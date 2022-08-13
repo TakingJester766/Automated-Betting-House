@@ -7,51 +7,61 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 // import "@openzeppelin/contracts/access/Ownable.sol"; 
 // https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/access/Ownable.sol
 
-contract YourContract {
-   
-    uint gameNumber;
+contract YourContract is Ownable {
+    // Public variables
+    uint gameNumber; // For gameId generation
+
+    // Contract owner variables
+    uint public feesPending;
+    uint feesCollected;
+    uint initFee;
 
    constructor() {
     gameNumber = 1;
+    feesPending = 0; 
+    initFee = 1000000000000000000;
    }
 
    // Structs 
     struct Game {
-        address host;
+        address host; // Establishes host function access
         uint gameId; // Allows different games to be played concurrently
-        uint buyinRequirement;
+        uint buyinRequirement; // To establish minimum buyin amount for a game
         uint etherWithdrawalReqs; // Tracks # of ether in total from requests. If >/< than contract balance, throws error        
-        uint gamePot;
-        uint8 tableWithdrawalReqs;
+        uint gamePot; // Tracks how much ether is in the game's pot
+        uint8 tableWithdrawalReqs; // Tracks how many players have requested a withdrawal
         uint8 playerCount; // Tracks # of of players in a game
         uint8 verifiedWithdrawalReqs; // Tracks # of verifs that withdrawal requests are valid
-        bool endedBuyin;
+        bool endedBuyin; // Host function to end buyin stage
     }
     
     struct Player {
-        string name;
-        uint gameId;
-        uint buyinAmount;
-        uint withdrawalAmount;
-        bool withdrawalReq;
-        bool verifyReqs;
-        bool hasWithdrawn;
+        string name; // Allows players to more easily identify eachother
+        uint gameId; // gameId generated from gameNumber
+        uint buyinAmount; // How much a player has bought in with
+        uint withdrawalAmount; // How much a player has requested a withdrawal for
+        bool withdrawalReq; // Tracks if a player has submitted a request
+        bool verifyReqs; // TO verify that all withdrawal requests look good at table
+        bool hasWithdrawn; // To signify that a player has paidout to prevent triggering of any functions after they receieve back their funds
     }
 
     // Mapping for players
-    mapping(address => Player) public playerInfo;
+    mapping(address => Player) public playerInfo; // To call Player struct based on the msg.sender
 
     // Mapping for locating each game's details
-    mapping(uint => Game) public idToGame;
+    mapping(uint => Game) public idToGame; // To call Game struct to see game details
 
     // Array of Player structs
-    Player[] private players;
+    Player[] private players; 
+
     // Array for Game structs. Allows games to be played continuously by resetting value in accordance with the current array struct
     Game[] private games;
 
     // ------------------------------------ Functions to enable new games --------------------------------------
 
-    function initializeGame(uint buyinReq) public {
+    function initializeGame(uint buyinReq) public payable {
+        require(msg.value == initFee, "In order to prevent spam games that never resolve, each game initialization will cost .0001 ether.");
+        feesPending += msg.value;
         idToGame[gameNumber] = Game(msg.sender, gameNumber, buyinReq, 0, 0, 0, 0, 0, false);
         games.push(idToGame[gameNumber]);
         gameNumber++;
@@ -73,6 +83,7 @@ contract YourContract {
     // For host to prevent further buyins
 
     function terminateBuyin () public {
+        require (idToGame[playerInfo[msg.sender].gameId].playerCount > 0, "You cannot end the buy-in period with 0 players!");
         require (idToGame[playerInfo[msg.sender].gameId].host == msg.sender, "You do not have access to call this function because you are not the game's host.");
         require (idToGame[playerInfo[msg.sender].gameId].endedBuyin == false, "You have already ended the buyin period.");      
         idToGame[playerInfo[msg.sender].gameId].endedBuyin = true;
@@ -81,7 +92,7 @@ contract YourContract {
     // ------------------------------------------ Withdrawal Functions ----------------------------------------------
 
      function addReq(uint amount) public {
-        require (idToGame[playerInfo[msg.sender].gameId].endedBuyin = true, "Wait for your host to end the buyin stage before placing a withdrawal request.");
+        require (idToGame[playerInfo[msg.sender].gameId].endedBuyin == true, "Wait for your host to end the buyin stage before placing a withdrawal request.");
         require(playerInfo[msg.sender].hasWithdrawn == false, "You have already paid out!");
         require(playerInfo[msg.sender].buyinAmount > 0, "You have to buy in before you can withdraw!");
         require(playerInfo[msg.sender].withdrawalReq == false, "You have already submitted a withdrawal request. Please abort current withdrawal request to make a new one.");
@@ -120,6 +131,22 @@ contract YourContract {
         playerInfo[msg.sender].gameId = 0;
         playerInfo[msg.sender].hasWithdrawn = true;
     }  
+
+    // ------------------------------------------ Contract Owner Functions ----------------------------------------------
+
+    function changeInitFee(uint newInitFee) public onlyOwner {
+        initFee = newInitFee;
+    }
+
+    function withdrawFees() public onlyOwner {
+        require(feesPending > 0, "No fees to collect.");
+        payable(msg.sender).transfer(feesPending);
+        feesPending = 0;
+    }
+
+
+
+
 
   
   // to support receiving ETH by default
